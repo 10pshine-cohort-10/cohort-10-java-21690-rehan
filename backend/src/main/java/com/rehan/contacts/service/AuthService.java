@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
@@ -23,6 +24,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 public class AuthService {
@@ -35,22 +37,26 @@ public class AuthService {
     private static final int MAX_CODE_ATTEMPTS = 5;
     private static final int MAX_PASSWORD_BYTES = 72;
 
+    private final ReentrantLock registerLock = new ReentrantLock();
+
     private final UserRepository userRepository;
     private final VerificationCodeRepository codeRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final TransactionTemplate transactionTemplate;
 
     public AuthService(UserRepository userRepository,
                        VerificationCodeRepository codeRepository,
                        PasswordEncoder passwordEncoder,
-                       JwtService jwtService) {
+                       JwtService jwtService,
+                       TransactionTemplate transactionTemplate) {
         this.userRepository = userRepository;
         this.codeRepository = codeRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.transactionTemplate = transactionTemplate;
     }
 
-    @Transactional
     public void register(RegisterRequest req) {
         String email = blankToNull(req.email());
         String phone = blankToNull(req.phone());
@@ -61,6 +67,19 @@ public class AuthService {
         if (req.password().getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password is too long, use a shorter one");
         }
+
+        String hashedPassword = passwordEncoder.encode(req.password());
+
+        registerLock.lock();
+        try {
+            transactionTemplate.executeWithoutResult(
+                    status -> saveNewUser(req, email, phone, hashedPassword));
+        } finally {
+            registerLock.unlock();
+        }
+    }
+
+    private void saveNewUser(RegisterRequest req, String email, String phone, String hashedPassword) {
         if (identifierTaken(req.username())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already taken");
         }
@@ -75,7 +94,7 @@ public class AuthService {
         user.setUsername(req.username());
         user.setEmail(email);
         user.setPhone(phone);
-        user.setPassword(passwordEncoder.encode(req.password()));
+        user.setPassword(hashedPassword);
         user.setFirstName(req.firstName());
         user.setLastName(req.lastName());
         userRepository.save(user);
@@ -88,7 +107,7 @@ public class AuthService {
         User user = findByIdentifier(req.identifier())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        VerificationCode saved = codeRepository.findTopByUserOrderByIdDesc(user)
+        VerificationCode saved = codeRepository.findFirstByUserOrderByIdDesc(user)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "No code found. Ask for a new code"));
 
         if (saved.getExpiresAt().isBefore(LocalDateTime.now())) {

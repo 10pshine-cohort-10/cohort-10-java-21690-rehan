@@ -28,7 +28,10 @@ function Login() {
     setLoading(true);
     try {
       const res = await login({ identifier: form.identifier.trim(), password: form.password });
-      saveToken(res.data.token);
+      if (!saveToken(res.data.token)) {
+        setError("Could not save your login. Check your browser storage settings");
+        return;
+      }
       navigate("/home");
     } catch (err) {
       setError(err.response?.data?.message || "Something went wrong");
