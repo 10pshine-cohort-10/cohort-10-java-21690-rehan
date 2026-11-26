@@ -18,6 +18,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.getStatusCode()).body(Map.of("message", message));
     }
 
+    @ExceptionHandler(ResendWaitException.class)
+    public ResponseEntity<Map<String, Object>> handleResendWait(ResendWaitException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(Map.of("message", ex.getMessage(), "secondsLeft", ex.getSecondsLeft()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()

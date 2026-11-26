@@ -39,8 +39,8 @@ function Register() {
 
     setLoading(true);
     try {
-      await register(form);
-      navigate("/verify", { state: { identifier: form.username } });
+      await register({ ...form, username });
+      navigate("/verify", { state: { identifier: username, sentAt: Date.now() } });
     } catch (err) {
       const data = err.response?.data;
       setError(data?.message || data?.detail || "Something went wrong");

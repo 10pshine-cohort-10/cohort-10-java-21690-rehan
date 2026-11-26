@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { resendCode, verify } from "../services/authService";
 
+const RESEND_SECONDS = 60;
+
 function Verify() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -11,7 +13,11 @@ function Verify() {
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const [wait, setWait] = useState(0);
+  const [wait, setWait] = useState(() => {
+    const sentAt = location.state?.sentAt;
+    if (!sentAt) return 0;
+    return Math.max(0, RESEND_SECONDS - Math.floor((Date.now() - sentAt) / 1000));
+  });
 
   useEffect(() => {
     if (wait <= 0) return;
@@ -57,9 +63,14 @@ function Verify() {
     try {
       await resendCode({ identifier: identifier.trim() });
       setInfo("A new code has been sent");
-      setWait(60);
+      setWait(RESEND_SECONDS);
     } catch (err) {
-      setError(err.response?.data?.message || "Something went wrong");
+      const data = err.response?.data;
+      if (err.response?.status === 429 && data?.secondsLeft) {
+        setWait(data.secondsLeft);
+      } else {
+        setError(data?.message || "Something went wrong");
+      }
     } finally {
       setResending(false);
     }

@@ -7,6 +7,7 @@ import com.rehan.contacts.dto.ResendRequest;
 import com.rehan.contacts.dto.VerifyRequest;
 import com.rehan.contacts.entity.User;
 import com.rehan.contacts.entity.VerificationCode;
+import com.rehan.contacts.exception.ResendWaitException;
 import com.rehan.contacts.repository.UserRepository;
 import com.rehan.contacts.repository.VerificationCodeRepository;
 import org.slf4j.Logger;
@@ -17,7 +18,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -29,6 +32,8 @@ public class AuthService {
 
     private static final int CODE_MINUTES = 5;
     private static final int RESEND_WAIT_SECONDS = 60;
+    private static final int MAX_CODE_ATTEMPTS = 5;
+    private static final int MAX_PASSWORD_BYTES = 72;
 
     private final UserRepository userRepository;
     private final VerificationCodeRepository codeRepository;
@@ -53,13 +58,16 @@ public class AuthService {
         if (email == null && phone == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter an email or a phone number");
         }
-        if (userRepository.existsByUsername(req.username())) {
+        if (req.password().getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password is too long, use a shorter one");
+        }
+        if (identifierTaken(req.username())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Username already taken");
         }
-        if (email != null && userRepository.existsByEmail(email)) {
+        if (email != null && identifierTaken(email)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already registered");
         }
-        if (phone != null && userRepository.existsByPhone(phone)) {
+        if (phone != null && identifierTaken(phone)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Phone already registered");
         }
 
@@ -75,7 +83,7 @@ public class AuthService {
         createCode(user);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ResponseStatusException.class)
     public void verify(VerifyRequest req) {
         User user = findByIdentifier(req.identifier())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
@@ -86,7 +94,12 @@ public class AuthService {
         if (saved.getExpiresAt().isBefore(LocalDateTime.now())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Code expired. Ask for a new code");
         }
-        if (!saved.getCode().equals(req.code())) {
+        if (saved.getAttempts() >= MAX_CODE_ATTEMPTS) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many wrong tries. Ask for a new code");
+        }
+        if (!passwordEncoder.matches(req.code(), saved.getCode())) {
+            saved.setAttempts(saved.getAttempts() + 1);
+            codeRepository.save(saved);
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Wrong code");
         }
 
@@ -107,9 +120,11 @@ public class AuthService {
         Optional<VerificationCode> last = codeRepository.findTopByUserOrderByIdDesc(user);
         if (last.isPresent()) {
             LocalDateTime sentAt = last.get().getExpiresAt().minusMinutes(CODE_MINUTES);
-            if (sentAt.plusSeconds(RESEND_WAIT_SECONDS).isAfter(LocalDateTime.now())) {
-                throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
-                        "Wait a minute before asking for a new code");
+            LocalDateTime allowedAt = sentAt.plusSeconds(RESEND_WAIT_SECONDS);
+            LocalDateTime now = LocalDateTime.now();
+            if (allowedAt.isAfter(now)) {
+                long millis = Duration.between(now, allowedAt).toMillis();
+                throw new ResendWaitException((int) Math.ceil(millis / 1000.0));
             }
         }
 
@@ -135,12 +150,18 @@ public class AuthService {
         String code = String.format("%05d", random.nextInt(100000));
 
         VerificationCode vc = new VerificationCode();
-        vc.setCode(code);
+        vc.setCode(passwordEncoder.encode(code));
         vc.setUser(user);
         vc.setExpiresAt(LocalDateTime.now().plusMinutes(CODE_MINUTES));
         codeRepository.save(vc);
 
         log.info("Verification code for {}: {}", user.getUsername(), code);
+    }
+
+    private boolean identifierTaken(String value) {
+        return userRepository.existsByUsername(value)
+                || userRepository.existsByEmail(value)
+                || userRepository.existsByPhone(value);
     }
 
     private Optional<User> findByIdentifier(String identifier) {

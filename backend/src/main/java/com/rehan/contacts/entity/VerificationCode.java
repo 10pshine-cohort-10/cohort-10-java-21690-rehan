@@ -11,7 +11,7 @@ public class VerificationCode {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, length = 5)
+    @Column(nullable = false, length = 60)
     private String code;
 
     @ManyToOne(optional = false)
@@ -20,6 +20,9 @@ public class VerificationCode {
 
     @Column(nullable = false)
     private LocalDateTime expiresAt;
+
+    @Column(nullable = false)
+    private int attempts = 0;
 
     public Long getId() { return id; }
 
@@ -31,4 +34,7 @@ public class VerificationCode {
 
     public LocalDateTime getExpiresAt() { return expiresAt; }
     public void setExpiresAt(LocalDateTime expiresAt) { this.expiresAt = expiresAt; }
+
+    public int getAttempts() { return attempts; }
+    public void setAttempts(int attempts) { this.attempts = attempts; }
 }

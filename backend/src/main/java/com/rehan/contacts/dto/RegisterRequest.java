@@ -18,7 +18,10 @@ public record RegisterRequest(
         @Size(min = 8, max = 72, message = "Password must be 8 to 72 characters")
         String password,
 
+        @Size(max = 255, message = "First name must be at most 255 characters")
         String firstName,
+
+        @Size(max = 255, message = "Last name must be at most 255 characters")
         String lastName
 ) {
 }
