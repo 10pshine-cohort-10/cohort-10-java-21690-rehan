@@ -1,5 +1,6 @@
 package com.rehan.contacts.exception;
 
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -22,6 +23,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, Object>> handleResendWait(ResendWaitException ex) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(Map.of("message", ex.getMessage(), "secondsLeft", ex.getSecondsLeft()));
+    }
+
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> handleLockFailure(PessimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(Map.of("message", "Server is busy, please try again"));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
